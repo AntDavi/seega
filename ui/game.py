@@ -11,35 +11,30 @@ class GameUI:
         self.janela.title("Seega")
         self.janela.geometry("900x600")
 
+        # Estado do jogo
         self.turno = tk.StringVar()
         self.fase = tk.StringVar()
-        
         self.tabuleiro = [["" for _ in range(5)] for _ in range(5)]
         self.minhas_pecas = 0
         self.pecas_colocadas_total = 0
         self.eh_minha_vez = is_host
         self.fase_atual = "colocacao"
-
-        self.mensagens_log = []
-        self.mensagens_chat = []
-        
         self.peca_selecionada = None
 
+        # Mensagens e interface
         self._montar_layout()
         self.turno.set("Sua vez de jogar" if is_host else "Aguardando adversário")
         self.fase.set("Fase de Colocação")
 
+        # Inicia thread para escutar o oponente
         threading.Thread(target=self.escutar_socket, daemon=True).start()
         self.janela.mainloop()
 
     def _montar_layout(self):
-        # Área esquerda (tabuleiro e controle)
         frame_esquerda = tk.Frame(self.janela, width=600, height=600)
         frame_esquerda.pack(side="left", fill="both", expand=True)
 
-        label_turno = tk.Label(frame_esquerda, textvariable=self.turno)
-        label_turno.pack(pady=5)
-
+        tk.Label(frame_esquerda, textvariable=self.turno).pack(pady=5)
         self.btn_desistir = tk.Button(frame_esquerda, text="Desistir", command=self.desistir)
         self.btn_desistir.pack()
 
@@ -47,17 +42,14 @@ class GameUI:
         self.tabuleiro_frame.pack(pady=10)
         self._criar_tabuleiro()
 
-        label_fase = tk.Label(frame_esquerda, textvariable=self.fase)
-        label_fase.pack(pady=5)
+        tk.Label(frame_esquerda, textvariable=self.fase).pack(pady=5)
 
-        # Área direita (chat e logs)
+        # Chat e logs
         frame_direita = tk.Frame(self.janela, width=300, bg="#ccc")
         frame_direita.pack(side="right", fill="both")
 
-        # Chat
         frame_chat = tk.Frame(frame_direita, height=350, bg="#ddd")
         frame_chat.pack(fill="x", padx=5, pady=5)
-
         tk.Label(frame_chat, text="Chat").pack()
         self.chat_text = tk.Text(frame_chat, height=15, state="disabled")
         self.chat_text.pack()
@@ -66,10 +58,8 @@ class GameUI:
         self.chat_entry.pack(fill="x", pady=5)
         self.chat_entry.bind("<Return>", self.enviar_mensagem)
 
-        # Logs
         frame_logs = tk.Frame(frame_direita, bg="#bbb")
         frame_logs.pack(fill="both", expand=True, padx=5, pady=5)
-
         tk.Label(frame_logs, text="Logs da Partida").pack()
         self.logs_text = tk.Text(frame_logs, height=10, state="disabled")
         self.logs_text.pack(fill="both", expand=True)
@@ -82,14 +72,9 @@ class GameUI:
                 btn = tk.Button(self.tabuleiro_frame, width=4, height=2, bg="white",
                                 command=lambda l=linha, c=coluna: self.clique_celula(l, c))
                 btn.grid(row=linha, column=coluna, padx=1, pady=1)
-                linha_botoes.append(btn)
                 if linha == 2 and coluna == 2:
-                    btn.config(state="disabled", bg="black")
-                    
-            # Habilita a casa central para movimentação
-            # if self.fase_atual == "movimentacao":
-            #     self.botoes[2][2].config(state="normal", bg="white")
-
+                    btn.config(state="disabled", bg="black")  # Casa central bloqueada na colocação
+                linha_botoes.append(btn)
             self.botoes.append(linha_botoes)
 
     def clique_celula(self, linha, coluna):
@@ -105,70 +90,57 @@ class GameUI:
                 self.adicionar_log("A casa central está bloqueada na fase de colocação.")
                 return
 
-            # Colocar peça
-            self.tabuleiro[linha][coluna] = "M"  # Minha peça
+            self.tabuleiro[linha][coluna] = "M"
             self.botoes[linha][coluna].config(bg="blue")
             self.minhas_pecas += 1
             self.pecas_colocadas_total += 1
 
-            # Enviar jogada
+            # Envia jogada ao oponente
             self.conexao.sendall(json.dumps({
                 "tipo": "jogada",
                 "conteudo": [linha, coluna]
             }).encode())
 
-            # Verificar fim da fase
             if self.pecas_colocadas_total >= 24:
                 self.fase.set("Fase de Movimentação")
                 self.fase_atual = "movimentacao"
                 self.adicionar_log("Fase de movimentação iniciada.")
+                self.botoes[2][2].config(state="normal", bg="white")
             else:
                 self.adicionar_log(f"Peça colocada em {chr(65 + linha)}{coluna + 1}")
                 self.eh_minha_vez = False
                 self.turno.set("Turno do oponente")
-            self.botoes[2][2].config(state="normal", bg="white")
 
         elif self.fase_atual == "movimentacao":
             if self.peca_selecionada is None:
-                # Selecionar uma peça
                 if self.tabuleiro[linha][coluna] != "M":
                     self.adicionar_log("Selecione uma das suas peças.")
                     return
                 self.peca_selecionada = (linha, coluna)
-                self.adicionar_log(f"Peça selecionada em {chr(65 + linha)}{coluna + 1}")
                 self.botoes[linha][coluna].config(relief="sunken")
+                self.adicionar_log(f"Peça selecionada em {chr(65 + linha)}{coluna + 1}")
             else:
                 origem = self.peca_selecionada
                 destino = (linha, coluna)
-
-                # Cancelar se clicou de novo na mesma peça
                 if origem == destino:
-                    self.botoes[origem[0]][origem[1]].config(relief="raised")
+                    self.botoes[linha][coluna].config(relief="raised")
                     self.peca_selecionada = None
-                    self.adicionar_log("Movimentação cancelada.")
                     return
-
-                # Validar destino
                 if self.tabuleiro[linha][coluna] != "":
                     self.adicionar_log("Destino já ocupado.")
                     return
-
-                # Movimentos válidos: cima, baixo, esquerda, direita
                 if not self.eh_movimento_valido(origem, destino):
-                    self.adicionar_log("Movimento inválido. Use apenas direções ortogonais.")
+                    self.adicionar_log("Movimento inválido.")
                     return
 
-                # Executar jogada
+                # Aplica o movimento
                 self.botoes[origem[0]][origem[1]].config(bg="white", relief="raised")
                 self.tabuleiro[origem[0]][origem[1]] = ""
-
                 self.tabuleiro[linha][coluna] = "M"
                 self.botoes[linha][coluna].config(bg="blue")
-
                 self.peca_selecionada = None
-                self.eh_minha_vez = False
-                self.turno.set("Turno do oponente")
 
+                self.adicionar_log(f"Você moveu de {chr(65 + origem[0])}{origem[1]+1} para {chr(65 + linha)}{coluna + 1}")
                 self.conexao.sendall(json.dumps({
                     "tipo": "movimento",
                     "conteudo": {
@@ -177,54 +149,27 @@ class GameUI:
                     }
                 }).encode())
 
-                self.adicionar_log(f"Você moveu de {chr(65 + origem[0])}{origem[1]+1} para {chr(65 + destino[0])}{destino[1]+1}")
+                # Captura após o movimento
+                capturadas = self.verificar_capturas(linha, coluna, "M", "O")
+                for l, c in capturadas:
+                    self.tabuleiro[l][c] = ""
+                    self.botoes[l][c].config(bg="white")
+                    self.adicionar_log(f"Você capturou peça em {chr(65 + l)}{c+1}")
+                if capturadas:
+                    self.conexao.sendall(json.dumps({
+                        "tipo": "captura",
+                        "conteudo": capturadas
+                    }).encode())
 
+                self.verificar_vitoria()
+                self.eh_minha_vez = False
+                self.turno.set("Turno do oponente")
 
     def eh_movimento_valido(self, origem, destino):
         l1, c1 = origem
         l2, c2 = destino
-        return (
-            (l1 == l2 and abs(c1 - c2) == 1) or  # esquerda/direita
-            (c1 == c2 and abs(l1 - l2) == 1)     # cima/baixo
-        )
+        return (l1 == l2 and abs(c1 - c2) == 1) or (c1 == c2 and abs(l1 - l2) == 1)
 
-
-
-    def enviar_mensagem(self, event):
-        msg = self.chat_entry.get()
-        if msg:
-            self.adicionar_chat(f"Você: {msg}")
-            try:
-                self.conexao.sendall(json.dumps({
-                    "tipo": "chat",
-                    "conteudo": msg
-                }).encode())
-            except Exception as e:
-                self.adicionar_log(f"[ERRO] Falha ao enviar mensagem: {e}")
-            self.chat_entry.delete(0, tk.END)
-
-
-    def adicionar_log(self, texto):
-        self.logs_text.config(state="normal")
-        self.logs_text.insert(tk.END, texto + "\n")
-        self.logs_text.config(state="disabled")
-
-    def adicionar_chat(self, texto):
-        self.chat_text.config(state="normal")
-        self.chat_text.insert(tk.END, texto + "\n")
-        self.chat_text.config(state="disabled")
-
-    def desistir(self):
-        try:
-            self.conexao.sendall(json.dumps({
-                "tipo": "desistir"
-            }).encode())
-        except:
-            pass
-        self.adicionar_log("Você desistiu da partida.")
-        self.janela.quit()
-
-        
     def escutar_socket(self):
         while True:
             try:
@@ -235,24 +180,23 @@ class GameUI:
 
                 if mensagem["tipo"] == "chat":
                     self.adicionar_chat(f"Oponente: {mensagem['conteudo']}")
+
                 elif mensagem["tipo"] == "jogada":
                     linha, coluna = mensagem["conteudo"]
+                    self.tabuleiro[linha][coluna] = "O"
+                    self.botoes[linha][coluna].config(bg="red")
+                    self.pecas_colocadas_total += 1
 
-                    if self.fase_atual == "colocacao":
-                        self.tabuleiro[linha][coluna] = "O"  # peça do oponente
-                        self.botoes[linha][coluna].config(bg="red")
-                        self.pecas_colocadas_total += 1
+                    if self.pecas_colocadas_total >= 24:
+                        self.fase.set("Fase de Movimentação")
+                        self.fase_atual = "movimentacao"
+                        self.adicionar_log("Fase de movimentação iniciada.")
+                        self.botoes[2][2].config(state="normal", bg="white")
+                    else:
+                        self.adicionar_log(f"Oponente colocou peça em {chr(65 + linha)}{coluna + 1}")
+                        self.eh_minha_vez = True
+                        self.turno.set("Sua vez de jogar")
 
-                        if self.pecas_colocadas_total >= 24:
-                            self.fase.set("Fase de Movimentação")
-                            self.fase_atual = "movimentacao"
-                            self.adicionar_log("Fase de movimentação iniciada.")
-                            self.botoes[2][2].config(state="normal", bg="white")  # Desbloqueia casa central
-                        else:
-                            self.adicionar_log(f"Oponente colocou peça em {chr(65 + linha)}{coluna + 1}")
-                            self.eh_minha_vez = True
-                            self.turno.set("Sua vez de jogar")
-                            
                 elif mensagem["tipo"] == "movimento":
                     origem = tuple(mensagem["conteudo"]["origem"])
                     destino = tuple(mensagem["conteudo"]["destino"])
@@ -267,6 +211,16 @@ class GameUI:
                     self.eh_minha_vez = True
                     self.turno.set("Sua vez de jogar")
 
+                elif mensagem["tipo"] == "captura":
+                    for l, c in mensagem["conteudo"]:
+                        self.tabuleiro[l][c] = ""
+                        self.botoes[l][c].config(bg="white")
+                        self.adicionar_log(f"Sua peça foi capturada em {chr(65 + l)}{c+1}")
+                    self.verificar_vitoria()
+
+                elif mensagem["tipo"] == "vitoria":
+                    self.adicionar_log("Oponente venceu. Você não tem mais peças.")
+                    self.janela.after(2000, self.janela.quit)
 
                 elif mensagem["tipo"] == "desistir":
                     self.adicionar_log("Oponente desistiu. Você venceu!")
@@ -276,3 +230,53 @@ class GameUI:
                 print(f"[ERRO] na escuta: {e}")
                 break
 
+    def verificar_capturas(self, linha, coluna, minha_cor, cor_oponente):
+        capturas = []
+        direcoes = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        for dl, dc in direcoes:
+            l_meio, c_meio = linha + dl, coluna + dc
+            l_fim, c_fim = linha + 2*dl, coluna + 2*dc
+            if 0 <= l_meio < 5 and 0 <= c_meio < 5 and 0 <= l_fim < 5 and 0 <= c_fim < 5:
+                if (self.tabuleiro[l_meio][c_meio] == cor_oponente and
+                    self.tabuleiro[l_fim][c_fim] == minha_cor):
+                    capturas.append((l_meio, c_meio))
+        return capturas
+
+    def verificar_vitoria(self):
+        pecas_oponente = sum(row.count("O") for row in self.tabuleiro)
+        pecas_minhas = sum(row.count("M") for row in self.tabuleiro)
+        if pecas_oponente == 0:
+            self.adicionar_log("Você venceu! O oponente não tem mais peças.")
+            self.conexao.sendall(json.dumps({"tipo": "vitoria"}).encode())
+            self.janela.after(2000, self.janela.quit)
+        elif pecas_minhas == 0:
+            self.adicionar_log("Você perdeu. Suas peças foram capturadas.")
+            self.janela.after(2000, self.janela.quit)
+
+    def enviar_mensagem(self, event):
+        msg = self.chat_entry.get()
+        if msg:
+            self.adicionar_chat(f"Você: {msg}")
+            try:
+                self.conexao.sendall(json.dumps({"tipo": "chat", "conteudo": msg}).encode())
+            except:
+                self.adicionar_log("[ERRO] ao enviar mensagem.")
+            self.chat_entry.delete(0, tk.END)
+
+    def adicionar_log(self, texto):
+        self.logs_text.config(state="normal")
+        self.logs_text.insert(tk.END, texto + "\n")
+        self.logs_text.config(state="disabled")
+
+    def adicionar_chat(self, texto):
+        self.chat_text.config(state="normal")
+        self.chat_text.insert(tk.END, texto + "\n")
+        self.chat_text.config(state="disabled")
+
+    def desistir(self):
+        try:
+            self.conexao.sendall(json.dumps({"tipo": "desistir"}).encode())
+        except:
+            pass
+        self.adicionar_log("Você desistiu da partida.")
+        self.janela.quit()
