@@ -155,7 +155,7 @@ Desenvolvido por **Anthony Davi**
 Aluno do curso de **Engenharia de Computação - IFCE**  
 Disciplina: Programação Paralela e Distribuída (2025.1)  
 Professor: *Cidcley T. de Souza*  
-Contato: [anthony.davi.sousa082aluno.ifce.edu.br]
+Contato: [anthony.davi.sousa08@aluno.ifce.edu.br]
 
 ---
 
